@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: coop_tracker_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: coop
+      POSTGRES_PASSWORD: coop
+      POSTGRES_DB: coop_tracker
+    ports:
+      - "8888:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
