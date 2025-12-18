@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { marked } from "marked";
 
 export type ParsedJob = {
   company: string;
@@ -69,7 +70,8 @@ function parseAgeToMinutes(ageText: string): number | null {
 
 export async function fetchAndParseSimplifyJobs(): Promise<ParsedJob[]> {
   const pageUrl =
-    process.env.SIMPLIFYJOBS_PAGE_URL ?? "https://github.com/SimplifyJobs/Summer2026-Internships";
+    process.env.SIMPLIFYJOBS_PAGE_URL ??
+    "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md";
 
   const response = await fetch(pageUrl, {
     method: "GET",
@@ -83,7 +85,8 @@ export async function fetchAndParseSimplifyJobs(): Promise<ParsedJob[]> {
     throw new Error(`Failed to fetch GitHub page: ${response.status} ${response.statusText}`);
   }
 
-  const html = await response.text();
+  const markdown = await response.text();
+  const html = await marked.parse(markdown);
   const $ = cheerio.load(html);
 
   const parsedJobs: ParsedJob[] = [];
