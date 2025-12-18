@@ -1,7 +1,9 @@
 import Link from "next/link";
 import prismaClient from "@/lib/prisma";
-import { pullJobsFromSimplifyJobs, toggleAppliedStatus } from "@/app/actions";
+import { pullJobsFromSimplifyJobs, updateJobStatus } from "@/app/actions";
 import FormButton from "@/app/components/FormButton";
+import SearchInput from "@/app/components/SearchInput";
+import ClickableRow from "@/app/components/ClickableRow";
 
 export default async function HomePage({
   searchParams,
@@ -10,31 +12,18 @@ export default async function HomePage({
 }) {
   const params = await searchParams;
   
-  // Parse Filter Params
-  const timeframe = params.timeframe as string;
+  // Normalize params for logic
+  const timeframe = typeof params.timeframe === "string" ? params.timeframe : "";
   const isCanadaOnly = params.canada === "true";
   const hideApplied = params.hideApplied === "true";
-  const search = params.q as string;
+  const search = typeof params.q === "string" ? params.q : "";
 
-  // Build Prisma Where Clause
+  // Build Prisma Query
   const where: any = {};
-
-  // 1. Timeframe Filter (using ageMinutes)
-  if (timeframe === "24h") where.ageMinutes = { lte: 24 * 60 };
-  else if (timeframe === "week") where.ageMinutes = { lte: 7 * 24 * 60 };
-  else if (timeframe === "month") where.ageMinutes = { lte: 30 * 24 * 60 };
-
-  // 2. Canada Filter
-  if (isCanadaOnly) {
-    where.location = { contains: "Canada", mode: "insensitive" };
-  }
-
-  // 3. Hide Applied Filter
-  if (hideApplied) {
-    where.applied = false;
-  }
-
-  // 4. Search Filter
+  if (hideApplied) where.status = "OPEN";
+  if (timeframe === "24h") where.ageMinutes = { lte: 1440 };
+  else if (timeframe === "week") where.ageMinutes = { lte: 10080 };
+  if (isCanadaOnly) where.location = { contains: "Canada", mode: "insensitive" };
   if (search) {
     where.OR = [
       { company: { contains: search, mode: "insensitive" } },
@@ -42,170 +31,158 @@ export default async function HomePage({
     ];
   }
 
-  const [totalJobCount, appliedJobCount, jobList] = await Promise.all([
+  // Fetch data with exact ordering requested
+  const [totalCount, inProgressCount, jobList, lastJob] = await Promise.all([
     prismaClient.job.count(),
-    prismaClient.job.count({ where: { applied: true } }),
+    prismaClient.job.count({ where: { NOT: { status: "OPEN" } } }),
     prismaClient.job.findMany({
       where,
-      orderBy: [{ ageMinutes: "asc" }, { company: "asc" }],
-      take: 1000, // Reduced slightly for performance
+      orderBy: [
+        { ageMinutes: "asc" }, 
+        { company: "asc" }, 
+        { role: "asc" }, 
+        { url: "asc" }
+      ],
+      take: 2000,
     }),
+    prismaClient.job.findFirst({ orderBy: { lastSeenAt: "desc" } })
   ]);
 
+  const lastSynced = lastJob?.lastSeenAt 
+    ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true }).format(lastJob.lastSeenAt)
+    : "Never";
+
+  // Working filter logic: correctly deletes keys to prevent "sticky" filters
+  const getUrl = (key: string, value: string | null) => {
+    const sp = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (typeof v === "string") sp.set(k, v);
+    });
+
+    // Toggle behavior: if value is already active, remove it
+    if (!value || params[key] === value) {
+      sp.delete(key);
+    } else {
+      sp.set(key, value);
+    }
+    
+    const query = sp.toString();
+    return query ? `?${query}` : "/";
+  };
+
   return (
-    <main className="mx-auto w-full max-w-6xl p-6">
-      <div className="flex flex-col gap-6">
-        {/* Header */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold">Coop Tracker</h1>
-            <p className="text-sm text-slate-600">
-              {totalJobCount.toLocaleString()} jobs, {appliedJobCount.toLocaleString()} applied.
-            </p>
+    <main className="mx-auto w-full max-w-7xl p-6 antialiased">
+      <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Opportunity Inbox</h1>
+            <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
+              <p>Sorted by: <span className="font-semibold text-slate-700">Newest Postings</span></p>
+              <span>•</span>
+              <p>Last Pulled: <span className="font-mono text-xs font-bold text-slate-600">{lastSynced}</span></p>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Link
-              href="/applied"
-              className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50"
-            >
-              View applied
+          <div className="flex items-center gap-3">
+            <Link href="/applied" className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold shadow-sm hover:bg-slate-50 transition-all">
+              Tracking Board →
             </Link>
             <form action={pullJobsFromSimplifyJobs}>
-              <FormButton className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">
-                Pull
+              <FormButton className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-slate-800 transition-all">
+                Pull Data
               </FormButton>
             </form>
           </div>
         </div>
 
-        {/* Filters Bar */}
-        <div className="flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-          {/* Search */}
-          <form className="flex grow items-center gap-2">
-            <input
-              type="text"
-              name="q"
-              defaultValue={search}
-              placeholder="Search company or role..."
-              className="w-full max-w-xs rounded-md border border-slate-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-slate-400"
-            />
-          </form>
+        <div className="flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <SearchInput placeholder="Search company or role..." defaultValue={search} />
 
-          {/* Timeframe Select */}
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase text-slate-500">Age:</span>
-            <div className="flex gap-1">
-              {[
-                { label: "All", value: "" },
-                { label: "24h", value: "24h" },
-                { label: "1w", value: "week" },
-              ].map((t) => (
+            <div className="flex bg-slate-100 p-1 rounded-lg">
+              {[{ label: "All", v: null }, { label: "24h", v: "24h" }, { label: "1w", v: "week" }].map((t) => (
                 <Link
-                  key={t.value}
-                  href={{ query: { ...params, timeframe: t.value } }}
-                  className={`rounded px-2 py-1 text-xs font-medium ${
-                    (timeframe || "") === t.value
-                      ? "bg-slate-900 text-white"
-                      : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"
+                  key={t.label}
+                  href={getUrl("timeframe", t.v)}
+                  className={`rounded-md px-3 py-1 text-xs font-bold transition-all ${
+                    (timeframe === (t.v || "")) ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
                   {t.label}
                 </Link>
               ))}
             </div>
-          </div>
 
-          {/* Toggles */}
-          <div className="flex gap-3 border-l border-slate-300 pl-4">
             <Link
-              href={{ query: { ...params, canada: isCanadaOnly ? undefined : "true" } }}
-              className={`flex items-center gap-2 text-sm font-medium ${isCanadaOnly ? "text-slate-900" : "text-slate-400"}`}
+              href={getUrl("canada", "true")}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
+                isCanadaOnly ? "bg-red-50 border-red-200 text-red-700 shadow-sm" : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+              }`}
             >
-              <div className={`h-4 w-4 rounded border flex items-center justify-center ${isCanadaOnly ? "bg-slate-900 border-slate-900" : "bg-white border-slate-300"}`}>
-                {isCanadaOnly && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
-              </div>
-              Canada Only
+              <div className={`h-3 w-3 rounded-full ${isCanadaOnly ? "bg-red-500" : "bg-slate-200"}`} />
+              🇨🇦 Canada Only
             </Link>
 
             <Link
-              href={{ query: { ...params, hideApplied: hideApplied ? undefined : "true" } }}
-              className={`flex items-center gap-2 text-sm font-medium ${hideApplied ? "text-slate-900" : "text-slate-400"}`}
+              href={getUrl("hideApplied", "true")}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
+                hideApplied ? "bg-slate-900 border-slate-900 text-white shadow-sm" : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+              }`}
             >
-              <div className={`h-4 w-4 rounded border flex items-center justify-center ${hideApplied ? "bg-slate-900 border-slate-900" : "bg-white border-slate-300"}`}>
-                {hideApplied && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
-              </div>
+              <div className={`h-3 w-3 rounded-full ${hideApplied ? "bg-emerald-400" : "bg-slate-200"}`} />
               Hide Applied
             </Link>
+            
+            <Link href="/" className="text-xs font-bold text-slate-400 hover:text-slate-900 ml-2">
+              Clear All
+            </Link>
           </div>
-          
-          {/* Clear Filters */}
-          <Link href="/" className="ml-auto text-xs text-slate-500 underline underline-offset-2 hover:text-slate-800">
-            Clear
-          </Link>
         </div>
-      </div>
 
-      {/* Table */}
-      <div className="mt-6 overflow-hidden rounded-lg border border-slate-200">
-        <div className="overflow-x-auto">
-          <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="w-52 px-4 py-3 text-left font-medium text-slate-700">Company</th>
-                <th className="w-[38%] px-4 py-3 text-left font-medium text-slate-700">Role</th>
-                <th className="w-[24%] px-4 py-3 text-left font-medium text-slate-700">Location</th>
-                <th className="w-20 px-4 py-3 text-left font-medium text-slate-700">Age</th>
-                <th className="w-20 px-4 py-3 text-left font-medium text-slate-700">Link</th>
-                <th className="w-32 px-4 py-3 text-left font-medium text-slate-700">Status</th>
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <table className="w-full table-fixed text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/50 text-slate-500 font-bold text-[10px] uppercase tracking-widest">
+                <th className="w-48 px-6 py-4">Company</th>
+                <th className="px-6 py-4">Role</th>
+                <th className="w-64 px-6 py-4">Location</th>
+                <th className="w-24 px-6 py-4">Posted</th>
+                <th className="w-32 px-6 py-4 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 bg-white">
-              {jobList.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
-                    No jobs found with these filters.
+            <tbody className="divide-y divide-slate-100">
+              {jobList.map((job) => (
+                <ClickableRow key={job.id} url={job.url} className={`hover:bg-slate-50 ${job.status !== "OPEN" ? "bg-emerald-50/20" : ""}`}>
+                  <td className="px-6 py-5 align-top font-bold text-slate-900 truncate">{job.company}</td>
+                  <td className="px-6 py-5 align-top font-medium text-slate-700 truncate">{job.role}</td>
+                  <td className="px-6 py-5 align-top text-slate-500 leading-snug italic truncate">{job.location}</td>
+                  <td className="px-6 py-5 align-top">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-slate-600 font-medium">{job.age ?? "—"}</span>
+                      {job.ageMinutes !== null && job.ageMinutes < 1440 && (
+                        <span className="text-[10px] font-black text-orange-500 uppercase italic tracking-tighter">New</span>
+                      )}
+                    </div>
                   </td>
-                </tr>
-              ) : (
-                jobList.map((job) => (
-                  <tr key={job.id} className={job.applied ? "bg-emerald-50/50" : "hover:bg-slate-50"}>
-                    <td className="px-4 py-3 align-top font-medium whitespace-nowrap">{job.company}</td>
-                    <td className="px-4 py-3 align-top whitespace-normal break-words">{job.role}</td>
-                    <td className="px-4 py-3 align-top text-slate-700 whitespace-normal break-words">{job.location}</td>
-                    <td className="px-4 py-3 align-top text-slate-700 whitespace-nowrap">{job.age ?? "—"}</td>
-                    <td className="px-4 py-3 align-top whitespace-nowrap">
-                      <a
-                        href={job.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-slate-900 underline underline-offset-2 hover:text-slate-700"
-                      >
-                        Apply
-                      </a>
-                    </td>
-                    <td className="px-4 py-3 align-top whitespace-nowrap">
-                      <form action={toggleAppliedStatus}>
-                        <input type="hidden" name="jobId" value={job.id} />
-                        <FormButton
-                          className={
-                            job.applied
-                              ? "rounded-md border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
-                              : "rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
-                          }
-                        >
-                          {job.applied ? "Applied" : "Mark applied"}
-                        </FormButton>
-                      </form>
-                    </td>
-                  </tr>
-                ))
-              )}
+                  <td className="px-6 py-5 align-top text-right">
+                    <form action={updateJobStatus}>
+                      <input type="hidden" name="jobId" value={job.id} />
+                      <input type="hidden" name="status" value={job.status === "OPEN" ? "APPLIED" : "OPEN"} />
+                      <FormButton className={`rounded-md px-4 py-1.5 text-[11px] font-black uppercase tracking-tighter transition-all shadow-sm ${
+                        job.status !== "OPEN" ? "bg-emerald-600 text-white" : "border border-slate-200 bg-white text-slate-800 hover:border-slate-400"
+                      }`}>
+                        {job.status === "OPEN" ? "Apply" : job.status}
+                      </FormButton>
+                    </form>
+                  </td>
+                </ClickableRow>
+              ))}
             </tbody>
           </table>
+          {jobList.length === 0 && (
+            <div className="py-24 text-center text-slate-400 italic font-medium">No results for current filters.</div>
+          )}
         </div>
       </div>
-
-      <p className="mt-4 text-xs text-slate-500">Data source: SimplifyJobs Summer 2026 internships list.</p>
     </main>
   );
 }

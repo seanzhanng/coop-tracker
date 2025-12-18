@@ -1,18 +1,16 @@
 import Link from "next/link";
 import prismaClient from "@/lib/prisma";
-import { toggleAppliedStatus } from "@/app/actions";
-import FormButton from "@/app/components/FormButton";
+import StatusSelect from "@/app/components/StatusSelect";
+import SearchInput from "@/app/components/SearchInput";
+import ClickableRow from "@/app/components/ClickableRow";
 
 function formatAppliedAt(value: Date | null): string {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Toronto",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true
+  return new Intl.DateTimeFormat("en-US", { 
+    month: "short", 
+    day: "numeric", 
+    hour: "numeric", 
+    minute: "2-digit" 
   }).format(value);
 }
 
@@ -23,27 +21,24 @@ export default async function AppliedJobsPage({
 }) {
   const params = await searchParams;
   
-  // Parse Filters
-  const timeframe = params.timeframe as string;
-  const isCanadaOnly = params.canada === "true";
-  const search = params.q as string;
+  // Normalize params
+  const timeframe = typeof params.timeframe === "string" ? params.timeframe : "";
+  const search = typeof params.q === "string" ? params.q : "";
+  const statusParam = typeof params.status === "string" ? params.status : "";
+  const activeStatusFilters = statusParam ? statusParam.split(",") : [];
 
-  // Build Query
-  const where: any = { applied: true };
+  const where: any = { NOT: { status: "OPEN" } };
 
-  // 1. Applied Within Timeframe (using JS Dates for the 'appliedAt' column)
   if (timeframe) {
     const now = new Date();
-    if (timeframe === "24h") where.appliedAt = { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) };
-    if (timeframe === "week") where.appliedAt = { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) };
+    const ms = timeframe === "24h" ? 86400000 : 604800000;
+    where.appliedAt = { gte: new Date(now.getTime() - ms) };
   }
 
-  // 2. Canada Filter
-  if (isCanadaOnly) {
-    where.location = { contains: "Canada", mode: "insensitive" };
+  if (activeStatusFilters.length > 0) {
+    where.status = { in: activeStatusFilters };
   }
 
-  // 3. Search Filter
   if (search) {
     where.OR = [
       { company: { contains: search, mode: "insensitive" } },
@@ -51,138 +46,170 @@ export default async function AppliedJobsPage({
     ];
   }
 
-  const appliedJobs = await prismaClient.job.findMany({
-    where,
-    orderBy: [{ appliedAt: "desc" }, { company: "asc" }]
-  });
+  // Preservation of your specific ordering
+  const [jobs, allActive] = await Promise.all([
+    prismaClient.job.findMany({
+      where,
+      orderBy: [
+        { appliedAt: "desc" }, 
+        { company: "asc" }, 
+        { role: "asc" }, 
+        { url: "asc" }
+      ]
+    }),
+    prismaClient.job.findMany({ where: { NOT: { status: "OPEN" } } })
+  ]);
+
+  const stats = {
+    APPLIED: allActive.filter(j => j.status === "APPLIED").length,
+    INTERVIEWING: allActive.filter(j => j.status === "INTERVIEWING").length,
+    OFFER: allActive.filter(j => j.status === "OFFER").length,
+    REJECTED: allActive.filter(j => j.status === "REJECTED").length,
+  };
+
+  // Robust URL builder to prevent "sticky" filters
+  const getFilterUrl = (key: string, value: string | null) => {
+    const sp = new URLSearchParams();
+    
+    // Copy existing params except the one we are toggling
+    Object.entries(params).forEach(([k, v]) => {
+      if (typeof v === "string" && k !== key) sp.set(k, v);
+    });
+
+    if (key === "status") {
+      const current = activeStatusFilters;
+      const next = current.includes(value!) 
+        ? current.filter(x => x !== value) 
+        : [...current, value!];
+      
+      if (next.length > 0) sp.set("status", next.join(","));
+    } else if (value && params[key] !== value) {
+      sp.set(key, value);
+    }
+
+    const query = sp.toString();
+    return query ? `?${query}` : "/applied";
+  };
 
   return (
-    <main className="mx-auto w-full max-w-6xl p-6">
-      <div className="flex flex-col gap-6">
-        {/* Header */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold">Applied Jobs</h1>
-            <p className="text-sm text-slate-600">
-              {appliedJobs.length.toLocaleString()} applications tracked.
+    <main className="mx-auto w-full max-w-7xl p-6 antialiased">
+      <div className="flex flex-col gap-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tracking Board</h1>
+            <p className="text-slate-500 mt-1 italic text-sm">
+              Sorted by: <span className="font-semibold text-slate-700">Latest Applications</span>
             </p>
           </div>
-          <Link
-            href="/"
-            className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50"
-          >
-            Back to all jobs
+          <Link href="/" className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold shadow-sm hover:bg-slate-50 transition-all">
+            ← Back to Inbox
           </Link>
         </div>
 
-        {/* Filters Bar */}
-        <div className="flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-emerald-50/30 p-4">
-          {/* Search */}
-          <form className="flex grow items-center gap-2">
-            <input
-              type="text"
-              name="q"
-              defaultValue={search}
-              placeholder="Search your applications..."
-              className="w-full max-w-xs rounded-md border border-slate-300 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-emerald-400"
-            />
-          </form>
+        {/* Compact Stats Overview Bar */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Applied</p>
+            <p className="text-2xl font-bold text-slate-900">{stats.APPLIED}</p>
+          </div>
+          <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl shadow-sm">
+            <p className="text-[10px] font-black uppercase text-blue-500 tracking-widest">Interviews</p>
+            <p className="text-2xl font-bold text-blue-700">{stats.INTERVIEWING}</p>
+          </div>
+          <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl shadow-sm">
+            <p className="text-[10px] font-black uppercase text-emerald-500 tracking-widest">Offers</p>
+            <p className="text-2xl font-bold text-emerald-700">{stats.OFFER}</p>
+          </div>
+          <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl shadow-sm">
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Rejected</p>
+            <p className="text-2xl font-bold text-slate-500">{stats.REJECTED}</p>
+          </div>
+        </div>
 
-          {/* Applied Date Filter */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase text-slate-500">Applied:</span>
-            <div className="flex gap-1">
-              {[
-                { label: "All", value: "" },
-                { label: "24h", value: "24h" },
-                { label: "1w", value: "week" },
-              ].map((t) => (
-                <Link
-                  key={t.value}
-                  href={{ query: { ...params, timeframe: t.value } }}
-                  className={`rounded px-2 py-1 text-xs font-medium ${
-                    (timeframe || "") === t.value
-                      ? "bg-emerald-700 text-white"
-                      : "bg-white border border-slate-200 text-slate-600 hover:bg-emerald-50"
+        <div className="flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <SearchInput placeholder="Search your applications..." defaultValue={search} />
+          
+          <div className="flex items-center gap-4 border-l pl-4 border-slate-200">
+            <span className="text-[10px] font-black uppercase text-slate-400">Filter Status:</span>
+            <div className="flex gap-4">
+              {["APPLIED", "INTERVIEWING", "OFFER", "REJECTED"].map((s) => {
+                const isActive = activeStatusFilters.includes(s);
+                return (
+                  <Link
+                    key={s}
+                    href={getFilterUrl("status", s)}
+                    className={`flex items-center gap-2 text-xs font-bold transition-all ${
+                      isActive ? "text-slate-900" : "text-slate-400 hover:text-slate-600"
+                    }`}
+                  >
+                    <div className={`h-4 w-4 rounded border flex items-center justify-center transition-colors ${
+                      isActive 
+                        ? (s === "OFFER" ? "bg-emerald-500 border-emerald-500" : s === "INTERVIEWING" ? "bg-blue-500 border-blue-500" : "bg-slate-900 border-slate-900") 
+                        : "bg-white border-slate-300"
+                    }`}>
+                      {isActive && <span className="text-white text-[10px]">✓</span>}
+                    </div>
+                    {s}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-lg ml-auto">
+             {[{ label: "All", v: null }, { label: "24h", v: "24h" }].map(t => (
+                <Link 
+                  key={t.label} 
+                  href={getFilterUrl("timeframe", t.v)} 
+                  className={`rounded-md px-4 py-1.5 text-xs font-bold transition-all ${
+                    (timeframe === (t.v || "")) ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
                   {t.label}
                 </Link>
-              ))}
-            </div>
-          </div>
-
-          {/* Toggles */}
-          <div className="flex gap-3 border-l border-slate-300 pl-4">
-            <Link
-              href={{ query: { ...params, canada: isCanadaOnly ? undefined : "true" } }}
-              className={`flex items-center gap-2 text-sm font-medium ${isCanadaOnly ? "text-emerald-900" : "text-slate-400"}`}
-            >
-              <div className={`h-4 w-4 rounded border flex items-center justify-center ${isCanadaOnly ? "bg-emerald-600 border-emerald-600" : "bg-white border-slate-300"}`}>
-                {isCanadaOnly && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
-              </div>
-              Canada Only
-            </Link>
+             ))}
           </div>
           
-          <Link href="/applied" className="ml-auto text-xs text-slate-500 underline underline-offset-2 hover:text-emerald-800">
-            Reset
+          <Link href="/applied" className="text-xs font-bold text-slate-400 hover:text-slate-900 ml-2">
+            Clear All
           </Link>
         </div>
-      </div>
 
-      <div className="mt-6 overflow-hidden rounded-lg border border-slate-200">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Company</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Role</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Location</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Applied at</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Link</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Action</th>
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <table className="w-full table-fixed text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/50 text-slate-500 font-bold text-[10px] uppercase tracking-widest">
+                <th className="w-56 px-6 py-4">Company</th>
+                <th className="px-6 py-4">Position</th>
+                <th className="w-48 px-6 py-4">Applied Date</th>
+                <th className="w-48 px-6 py-4 text-right">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 bg-white">
-              {appliedJobs.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-slate-500 italic">
-                    No matching applications found.
+            <tbody className="divide-y divide-slate-100">
+              {jobs.map(job => (
+                <ClickableRow key={job.id} url={job.url} className={`${
+                  job.status === "OFFER" ? "bg-emerald-50/40" : 
+                  job.status === "INTERVIEWING" ? "bg-blue-50/40" : 
+                  job.status === "REJECTED" ? "opacity-50 grayscale" : "hover:bg-slate-50"
+                }`}>
+                  <td className="px-6 py-5 align-top font-bold text-slate-900 text-base">{job.company}</td>
+                  <td className="px-6 py-5 align-top">
+                    <div className="font-medium text-slate-700 mb-1 truncate">{job.role}</div>
+                    <div className="text-xs text-slate-400 italic truncate">{job.location}</div>
                   </td>
-                </tr>
-              ) : (
-                appliedJobs.map(job => (
-                  <tr key={job.id} className="hover:bg-emerald-50/30 transition-colors">
-                    <td className="px-4 py-3 align-top font-medium whitespace-nowrap">{job.company}</td>
-                    <td className="px-4 py-3 align-top">{job.role}</td>
-                    <td className="px-4 py-3 align-top text-slate-700">{job.location}</td>
-                    <td className="px-4 py-3 align-top text-slate-600 font-mono text-[11px]">
+                  <td className="px-6 py-5 align-top">
+                    <div className="text-slate-600 font-mono text-[11px] bg-white border border-slate-200 w-fit px-2 py-1 rounded">
                       {formatAppliedAt(job.appliedAt)}
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <a
-                        href={job.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
-                      >
-                        Link
-                      </a>
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <form action={toggleAppliedStatus}>
-                        <input type="hidden" name="jobId" value={job.id} />
-                        <FormButton className="text-xs font-medium text-slate-400 hover:text-red-600 transition-colors">
-                          Undo
-                        </FormButton>
-                      </form>
-                    </td>
-                  </tr>
-                ))
-              )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-5 align-top text-right">
+                    <StatusSelect jobId={job.id} currentStatus={job.status} />
+                  </td>
+                </ClickableRow>
+              ))}
             </tbody>
           </table>
+          {jobs.length === 0 && <div className="py-24 text-center text-slate-400 italic font-medium">No applications found.</div>}
         </div>
       </div>
     </main>

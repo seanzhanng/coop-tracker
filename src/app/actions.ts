@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import prismaClient from "@/lib/prisma";
 import { fetchAndParseSimplifyJobs } from "@/lib/simplifyJobsPull";
 import { upsertJobsByUrl } from "@/lib/jobSync";
+import { JobStatus } from "@prisma/client";
 
 export async function pullJobsFromSimplifyJobs(): Promise<void> {
   const parsedJobs = await fetchAndParseSimplifyJobs();
@@ -12,20 +13,23 @@ export async function pullJobsFromSimplifyJobs(): Promise<void> {
   revalidatePath("/applied");
 }
 
-export async function toggleAppliedStatus(formData: FormData): Promise<void> {
+export async function updateJobStatus(formData: FormData): Promise<void> {
   const jobId = String(formData.get("jobId") ?? "");
-  if (!jobId) return;
+  const status = String(formData.get("status") ?? "") as JobStatus;
+  
+  if (!jobId || !status) return;
 
-  const jobRecord = await prismaClient.job.findUnique({ where: { id: jobId } });
-  if (!jobRecord) return;
+  const data: any = { status };
+  
+  if (status === "APPLIED") {
+    data.appliedAt = new Date();
+  } else if (status === "OPEN") {
+    data.appliedAt = null;
+  }
 
-  const nextAppliedValue = !jobRecord.applied;
   await prismaClient.job.update({
     where: { id: jobId },
-    data: {
-      applied: nextAppliedValue,
-      appliedAt: nextAppliedValue ? new Date() : null
-    }
+    data
   });
 
   revalidatePath("/");

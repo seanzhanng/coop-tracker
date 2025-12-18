@@ -7,16 +7,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum JobStatus {
+  OPEN
+  APPLIED
+  INTERVIEWING
+  REJECTED
+  OFFER
+}
+
 model Job {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   company     String
   role        String
   location    String
-  url         String   @unique
-  age        String?
-  ageMinutes Int?
-  applied     Boolean  @default(false)
+  url         String    @unique
+  age         String?
+  ageMinutes  Int?
+  status      JobStatus @default(OPEN)
   appliedAt   DateTime?
-  firstSeenAt DateTime @default(now())
-  lastSeenAt  DateTime @updatedAt
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @updatedAt
 }
