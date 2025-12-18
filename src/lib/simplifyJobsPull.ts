@@ -5,6 +5,8 @@ export type ParsedJob = {
   role: string;
   location: string;
   url: string;
+  age: string | null;
+  ageMinutes: number | null;
 };
 
 const iconRegex = /[🔥🇺🇸🔒🎓🛂]/g;
@@ -39,6 +41,30 @@ function headersMatchJobTable(headers: string[]): boolean {
 function findColumnIndex(headers: string[], predicate: (h: string) => boolean): number {
   const normalized = headers.map(h => cleanText(h).toLowerCase());
   return normalized.findIndex(predicate);
+}
+
+function parseAgeToMinutes(ageText: string): number | null {
+  const normalized = cleanText(ageText).replace(/\+/g, "");
+  if (!normalized) return null;
+
+  const parts = normalized.split(/\s+/);
+  let totalMinutes = 0;
+  let matchedAny = false;
+
+  for (const part of parts) {
+    const match = part.match(/^(\d+)([dhm])$/i);
+    if (!match) continue;
+
+    matchedAny = true;
+    const value = Number(match[1]);
+    const unit = match[2].toLowerCase();
+
+    if (unit === "d") totalMinutes += value * 24 * 60;
+    if (unit === "h") totalMinutes += value * 60;
+    if (unit === "m") totalMinutes += value;
+  }
+
+  return matchedAny ? totalMinutes : null;
 }
 
 export async function fetchAndParseSimplifyJobs(): Promise<ParsedJob[]> {
@@ -86,6 +112,7 @@ export async function fetchAndParseSimplifyJobs(): Promise<ParsedJob[]> {
     const roleIndex = findColumnIndex(headers, h => h === "role");
     const locationIndex = findColumnIndex(headers, h => h === "location");
     const applicationIndex = findColumnIndex(headers, h => h.includes("application") || h.includes("apply") || h.includes("link"));
+    const ageIndex = findColumnIndex(headers, h => h === "age");
 
     if ([companyIndex, roleIndex, locationIndex, applicationIndex].some(i => i < 0)) {
       return;
@@ -99,6 +126,7 @@ export async function fetchAndParseSimplifyJobs(): Promise<ParsedJob[]> {
       const roleCell = cells.eq(roleIndex);
       const locationCell = cells.eq(locationIndex);
       const applicationCell = cells.eq(applicationIndex);
+      const ageCell = ageIndex >= 0 ? cells.eq(ageIndex) : null;
 
       let company = cleanText(companyCell.text());
       if (company === arrowCompanyMarker) company = lastCompany;
@@ -113,11 +141,15 @@ export async function fetchAndParseSimplifyJobs(): Promise<ParsedJob[]> {
 
       if (!role || !url) return;
 
+      const age = ageCell ? cleanText(ageCell.text()) : "";
+      const ageValue = age ? age : null;
+      const ageMinutes = ageValue ? parseAgeToMinutes(ageValue) : null;
+
       const key = [company, role, location, url].join("|");
       if (seen.has(key)) return;
       seen.add(key);
 
-      parsedJobs.push({ company, role, location, url });
+      parsedJobs.push({ company, role, location, url, age: ageValue, ageMinutes });
     });
   });
 

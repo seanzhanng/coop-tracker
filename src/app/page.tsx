@@ -8,7 +8,7 @@ export default async function HomePage() {
     prismaClient.job.count(),
     prismaClient.job.count({ where: { applied: true } }),
     prismaClient.job.findMany({
-      orderBy: [{ lastSeenAt: "desc" }, { company: "asc" }, { role: "asc" }],
+      orderBy: [{ ageMinutes: "asc" }, { company: "asc" }, { role: "asc" }, {url: "asc"}],
       take: 5000
     })
   ]);
@@ -39,23 +39,25 @@ export default async function HomePage() {
 
       <div className="mt-6 overflow-hidden rounded-lg border border-slate-200">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50">
               <tr>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Company</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Role</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Location</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Link</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Status</th>
+                <th className="w-52 px-4 py-3 text-left font-medium text-slate-700">Company</th>
+                <th className="w-[38%] px-4 py-3 text-left font-medium text-slate-700">Role</th>
+                <th className="w-[24%] px-4 py-3 text-left font-medium text-slate-700">Location</th>
+                <th className="w-20 px-4 py-3 text-left font-medium text-slate-700">Age</th>
+                <th className="w-20 px-4 py-3 text-left font-medium text-slate-700">Link</th>
+                <th className="w-32 px-4 py-3 text-left font-medium text-slate-700">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white">
               {jobList.map(job => (
                 <tr key={job.id} className={job.applied ? "bg-emerald-50" : ""}>
-                  <td className="px-4 py-3 align-top font-medium">{job.company}</td>
-                  <td className="px-4 py-3 align-top">{job.role}</td>
-                  <td className="px-4 py-3 align-top text-slate-700">{job.location}</td>
-                  <td className="px-4 py-3 align-top">
+                  <td className="px-4 py-3 align-top font-medium whitespace-nowrap">{job.company}</td>
+                  <td className="px-4 py-3 align-top whitespace-normal break-words">{job.role}</td>
+                  <td className="px-4 py-3 align-top text-slate-700 whitespace-normal break-words">{job.location}</td>
+                  <td className="px-4 py-3 align-top text-slate-700 whitespace-nowrap">{job.age ?? "—"}</td>
+                  <td className="px-4 py-3 align-top whitespace-nowrap">
                     <a
                       href={job.url}
                       target="_blank"
@@ -65,7 +67,7 @@ export default async function HomePage() {
                       Apply
                     </a>
                   </td>
-                  <td className="px-4 py-3 align-top">
+                  <td className="px-4 py-3 align-top whitespace-nowrap">
                     <form action={toggleAppliedStatus}>
                       <input type="hidden" name="jobId" value={job.id} />
                       <FormButton
@@ -86,9 +88,7 @@ export default async function HomePage() {
         </div>
       </div>
 
-      <p className="mt-4 text-xs text-slate-500">
-        Data source: SimplifyJobs Summer 2026 internships list.
-      </p>
+      <p className="mt-4 text-xs text-slate-500">Data source: SimplifyJobs Summer 2026 internships list.</p>
     </main>
   );
 }

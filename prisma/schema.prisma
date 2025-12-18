@@ -13,6 +13,8 @@ model Job {
   role        String
   location    String
   url         String   @unique
+  age        String?
+  ageMinutes Int?
   applied     Boolean  @default(false)
   appliedAt   DateTime?
   firstSeenAt DateTime @default(now())

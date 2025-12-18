@@ -3,10 +3,24 @@ import prismaClient from "@/lib/prisma";
 import { toggleAppliedStatus } from "@/app/actions";
 import FormButton from "@/app/components/FormButton";
 
+function formatAppliedAt(value: Date | null): string {
+  if (!value) return "—";
+
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Toronto",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  }).format(value);
+}
+
 export default async function AppliedJobsPage() {
   const appliedJobs = await prismaClient.job.findMany({
     where: { applied: true },
-    orderBy: [{ appliedAt: "desc" }, { company: "asc" }, { role: "asc" }]
+    orderBy: [{ appliedAt: "desc" }, { company: "asc" }, { role: "asc" }, { url: "asc" }]
   });
 
   return (
@@ -34,6 +48,8 @@ export default async function AppliedJobsPage() {
                 <th className="px-4 py-3 text-left font-medium text-slate-700">Company</th>
                 <th className="px-4 py-3 text-left font-medium text-slate-700">Role</th>
                 <th className="px-4 py-3 text-left font-medium text-slate-700">Location</th>
+                <th className="px-4 py-3 text-left font-medium text-slate-700">Age</th>
+                <th className="px-4 py-3 text-left font-medium text-slate-700">Applied at</th>
                 <th className="px-4 py-3 text-left font-medium text-slate-700">Link</th>
                 <th className="px-4 py-3 text-left font-medium text-slate-700">Status</th>
               </tr>
@@ -44,6 +60,8 @@ export default async function AppliedJobsPage() {
                   <td className="px-4 py-3 align-top font-medium">{job.company}</td>
                   <td className="px-4 py-3 align-top">{job.role}</td>
                   <td className="px-4 py-3 align-top text-slate-700">{job.location}</td>
+                  <td className="px-4 py-3 align-top text-slate-700">{job.age ?? "—"}</td>
+                  <td className="px-4 py-3 align-top text-slate-700">{formatAppliedAt(job.appliedAt)}</td>
                   <td className="px-4 py-3 align-top">
                     <a
                       href={job.url}

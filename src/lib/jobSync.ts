@@ -23,6 +23,8 @@ export async function upsertJobsByUrl(parsedJobs: ParsedJob[]): Promise<SyncResu
             company: job.company,
             role: job.role,
             location: job.location,
+            age: job.age,
+            ageMinutes: job.ageMinutes,
             url: job.url,
             firstSeenAt: now
           },
