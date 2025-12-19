@@ -5,6 +5,25 @@ import FormButton from "@/app/components/FormButton";
 import SearchInput from "@/app/components/SearchInput";
 import ClickableRow from "@/app/components/ClickableRow";
 
+// Helper to calculate age relative to the current time
+function getDynamicAge(firstSeenAt: Date, ageMinutesFromGithub: number | null) {
+  const now = new Date();
+  const diffInMs = now.getTime() - firstSeenAt.getTime();
+  
+  // Convert ageMinutes (from GitHub) into milliseconds and add to discovery time
+  // This helps offset the time if GitHub said it was already 2 days old when we found it
+  const offsetMs = (ageMinutesFromGithub || 0) * 60 * 1000;
+  const totalDiffMs = diffInMs + offsetMs;
+
+  const days = Math.floor(totalDiffMs / (1000 * 60 * 60 * 24));
+  const hours = Math.floor(totalDiffMs / (1000 * 60 * 60));
+  const minutes = Math.floor(totalDiffMs / (1000 * 60));
+
+  if (days > 0) return `${days}d`;
+  if (hours > 0) return `${hours}h`;
+  return `${minutes}m`;
+}
+
 export default async function HomePage({
   searchParams,
 }: {
@@ -12,17 +31,18 @@ export default async function HomePage({
 }) {
   const params = await searchParams;
   
-  // Normalize params for logic
   const timeframe = typeof params.timeframe === "string" ? params.timeframe : "";
   const isCanadaOnly = params.canada === "true";
   const hideApplied = params.hideApplied === "true";
   const search = typeof params.q === "string" ? params.q : "";
 
-  // Build Prisma Query
   const where: any = {};
   if (hideApplied) where.status = "OPEN";
+  
+  // Filtering still uses ageMinutes for consistency with the source data
   if (timeframe === "24h") where.ageMinutes = { lte: 1440 };
   else if (timeframe === "week") where.ageMinutes = { lte: 10080 };
+  
   if (isCanadaOnly) where.location = { contains: "Canada", mode: "insensitive" };
   if (search) {
     where.OR = [
@@ -31,7 +51,6 @@ export default async function HomePage({
     ];
   }
 
-  // Fetch data with exact ordering requested
   const [totalCount, inProgressCount, jobList, lastJob] = await Promise.all([
     prismaClient.job.count(),
     prismaClient.job.count({ where: { NOT: { status: "OPEN" } } }),
@@ -52,14 +71,12 @@ export default async function HomePage({
     ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true }).format(lastJob.lastSeenAt)
     : "Never";
 
-  // Working filter logic: correctly deletes keys to prevent "sticky" filters
   const getUrl = (key: string, value: string | null) => {
     const sp = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
       if (typeof v === "string") sp.set(k, v);
     });
 
-    // Toggle behavior: if value is already active, remove it
     if (!value || params[key] === value) {
       sp.delete(key);
     } else {
@@ -157,8 +174,11 @@ export default async function HomePage({
                   <td className="px-6 py-5 align-top text-slate-500 leading-snug italic truncate">{job.location}</td>
                   <td className="px-6 py-5 align-top">
                     <div className="flex flex-col gap-1">
-                      <span className="text-slate-600 font-medium">{job.age ?? "—"}</span>
-                      {job.ageMinutes !== null && job.ageMinutes < 1440 && (
+                      <span className="text-slate-600 font-medium">
+                        {getDynamicAge(job.firstSeenAt, job.ageMinutes)}
+                      </span>
+                      {/* Badge shows if job was found by us OR posted to GitHub in last 24h */}
+                      {(job.ageMinutes !== null && job.ageMinutes < 1440) && (
                         <span className="text-[10px] font-black text-orange-500 uppercase italic tracking-tighter">New</span>
                       )}
                     </div>
@@ -178,9 +198,6 @@ export default async function HomePage({
               ))}
             </tbody>
           </table>
-          {jobList.length === 0 && (
-            <div className="py-24 text-center text-slate-400 italic font-medium">No results for current filters.</div>
-          )}
         </div>
       </div>
     </main>
