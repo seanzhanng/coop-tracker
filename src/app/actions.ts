@@ -35,3 +35,52 @@ export async function updateJobStatus(formData: FormData): Promise<void> {
   revalidatePath("/");
   revalidatePath("/applied");
 }
+
+export async function deleteJob(jobId: string) {
+  await prismaClient.job.delete({ where: { id: jobId } });
+  revalidatePath("/");
+  revalidatePath("/applied");
+}
+
+export async function manuallyAddJob(formData: FormData) {
+  const id = formData.get("id") as string | null;
+  const company = formData.get("company") as string;
+  const role = formData.get("role") as string;
+  const location = formData.get("location") as string;
+  const category = formData.get("category") as string;
+  const url = (formData.get("url") as string) || `manual-${Date.now()}`;
+
+  const data = {
+    company,
+    role,
+    location,
+    category: category || "Software Engineering",
+    url,
+  };
+
+  if (id) {
+    await prismaClient.job.update({
+      where: { id },
+      data,
+    });
+  } else {
+    const now = new Date();
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+
+    await prismaClient.job.create({
+      data: {
+        ...data,
+        status: "APPLIED",
+        appliedAt: now,
+        firstSeenAt: midnight,
+        lastSeenAt: now,
+        ageMinutes: 0,
+        age: "0d",
+      },
+    });
+  }
+
+  revalidatePath("/applied");
+  revalidatePath("/");
+}
