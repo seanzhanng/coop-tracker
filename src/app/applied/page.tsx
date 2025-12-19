@@ -4,6 +4,7 @@ import StatusSelect from "@/app/components/StatusSelect";
 import SearchInput from "@/app/components/SearchInput";
 import ClickableRow from "@/app/components/ClickableRow";
 import ThemeToggle from "../components/ThemeToggle";
+import AddJobForm from "@/app/components/AddJobForm";
 
 function formatAppliedAt(value: Date | null): string {
   if (!value) return "—";
@@ -26,12 +27,17 @@ export default async function AppliedJobsPage({ searchParams }: { searchParams: 
   if (activeStatusFilters.length > 0) where.status = { in: activeStatusFilters };
   if (search) where.OR = [{ company: { contains: search, mode: "insensitive" } }, { role: { contains: search, mode: "insensitive" } }];
 
-  const [jobs, allActive] = await Promise.all([
+  const [jobs, allActive, categories] = await Promise.all([
     prismaClient.job.findMany({
       where,
       orderBy: [{ appliedAt: "desc" }, { company: "asc" }, { role: "asc" }, { url: "asc" }]
     }),
-    prismaClient.job.findMany({ where: { NOT: { status: "OPEN" } } })
+    prismaClient.job.findMany({ where: { NOT: { status: "OPEN" } } }),
+    prismaClient.job.findMany({
+      distinct: ['category'],
+      select: { category: true },
+      orderBy: { category: 'asc' }
+    })
   ]);
 
   const stats = {
@@ -48,7 +54,9 @@ export default async function AppliedJobsPage({ searchParams }: { searchParams: 
       const current = activeStatusFilters;
       const next = current.includes(value!) ? current.filter(x => x !== value) : [...current, value!];
       if (next.length > 0) sp.set("status", next.join(","));
-    } else if (value && params[key] !== value) sp.set(key, value);
+    } else if (value && params[key] !== value) {
+      sp.set(key, value);
+    }
     const query = sp.toString();
     return query ? `?${query}` : "/applied";
   };
@@ -63,6 +71,8 @@ export default async function AppliedJobsPage({ searchParams }: { searchParams: 
             <Link href="/" className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-bold shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 dark:text-white transition-all">← Back to Job Board</Link>
           </div>
         </div>
+
+        <AddJobForm existingCategories={categories.map(c => c.category)} />
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl shadow-sm"><p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Applied</p><p className="text-2xl font-bold text-slate-900 dark:text-white">{stats.APPLIED}</p></div>
@@ -106,7 +116,7 @@ export default async function AppliedJobsPage({ searchParams }: { searchParams: 
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {jobs.map(job => (
-                <ClickableRow key={job.id} url={job.url} className={`${job.status === "OFFER" ? "bg-emerald-50/40 dark:bg-emerald-900/10" : job.status === "INTERVIEWING" ? "bg-blue-50/40 dark:bg-blue-900/10" : job.status === "REJECTED" ? "opacity-50 grayscale" : "hover:bg-slate-50 dark:hover:bg-slate-800"}`}>
+                <ClickableRow key={job.id} url={job.url} className={`${job.status === "OFFER" ? "bg-emerald-50/40 dark:bg-emerald-900/10" : job.status === "INTERVIEWING" ? "bg-blue-50/40 dark:bg-blue-900/10" : job.status === "REJECTED" ? "opacity-50 grayscale" : "hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"}`}>
                   <td className="px-6 py-5 align-top font-bold text-slate-900 dark:text-white text-base">{job.company}</td>
                   <td className="px-6 py-5 align-top">
                     <div className="font-medium text-slate-700 dark:text-slate-300 mb-1 truncate">{job.role}</div>

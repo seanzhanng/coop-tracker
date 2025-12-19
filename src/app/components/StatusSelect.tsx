@@ -32,7 +32,7 @@ export default function StatusSelect({
       name="status"
       value={status}
       onChange={handleChange}
-      className="text-xs font-bold border rounded p-1 outline-none bg-white cursor-pointer hover:border-slate-400"
+      className="text-xs font-bold border border-slate-200 dark:border-slate-700 rounded p-1 outline-none bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 cursor-pointer hover:border-slate-400 dark:hover:border-slate-500 transition-colors"
     >
       <option value="APPLIED">Applied</option>
       <option value="INTERVIEWING">Interviewing</option>
