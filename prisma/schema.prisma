@@ -16,15 +16,16 @@ enum JobStatus {
 }
 
 model Job {
-  id          String    @id @default(uuid())
-  company     String
-  role        String
-  location    String
-  url         String    @unique
-  age         String?
-  ageMinutes  Int?
-  status      JobStatus @default(OPEN)
-  appliedAt   DateTime?
-  firstSeenAt DateTime  @default(now())
-  lastSeenAt  DateTime  @updatedAt
+  id           String    @id @default(uuid())
+  company      String
+  role         String
+  location     String
+  url          String    @unique
+  category     String    @default("Software Engineering")
+  age          String?
+  ageMinutes   Int?
+  status       JobStatus @default(OPEN)
+  appliedAt    DateTime?
+  firstSeenAt  DateTime  @default(now())
+  lastSeenAt   DateTime  @updatedAt
 }

@@ -12,14 +12,13 @@ export default function StatusSelect({
 }) {
   const [status, setStatus] = useState(currentStatus);
 
-  // Sync state if the server sends a new value (e.g., after a refresh or update)
   useEffect(() => {
     setStatus(currentStatus);
   }, [currentStatus]);
 
   const handleChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const nextStatus = e.target.value;
-    setStatus(nextStatus); // Optimistic UI update
+    setStatus(nextStatus);
     
     const formData = new FormData();
     formData.append("jobId", jobId);

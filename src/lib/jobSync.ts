@@ -9,6 +9,8 @@ export type SyncResult = {
 
 export async function upsertJobsByUrl(parsedJobs: ParsedJob[]): Promise<SyncResult> {
   const now = new Date();
+  now.setHours(0, 0, 0, 0); 
+
   let insertedCount = 0;
   let updatedCount = 0;
 
@@ -23,17 +25,17 @@ export async function upsertJobsByUrl(parsedJobs: ParsedJob[]): Promise<SyncResu
             company: job.company,
             role: job.role,
             location: job.location,
+            category: job.category,
             age: job.age,
             ageMinutes: job.ageMinutes,
             url: job.url,
             firstSeenAt: now,
-            // lastSeenAt is updated via @updatedAt in schema
           },
           update: {
             company: job.company,
             role: job.role,
             location: job.location,
-            // Keep age updated so your "ageMinutes" sorting stays accurate to GitHub
+            category: job.category,
             age: job.age,
             ageMinutes: job.ageMinutes,
           }
@@ -42,7 +44,6 @@ export async function upsertJobsByUrl(parsedJobs: ParsedJob[]): Promise<SyncResu
     );
 
     for (const jobRecord of batchResults) {
-      // Check if it was just created (Prisma transaction returns the record)
       if (jobRecord.firstSeenAt.getTime() === now.getTime()) {
         insertedCount += 1;
       } else {

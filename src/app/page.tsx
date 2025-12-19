@@ -5,23 +5,15 @@ import FormButton from "@/app/components/FormButton";
 import SearchInput from "@/app/components/SearchInput";
 import ClickableRow from "@/app/components/ClickableRow";
 
-// Helper to calculate age relative to the current time
 function getDynamicAge(firstSeenAt: Date, ageMinutesFromGithub: number | null) {
   const now = new Date();
+  now.setHours(0, 0, 0, 0); 
   const diffInMs = now.getTime() - firstSeenAt.getTime();
-  
-  // Convert ageMinutes (from GitHub) into milliseconds and add to discovery time
-  // This helps offset the time if GitHub said it was already 2 days old when we found it
-  const offsetMs = (ageMinutesFromGithub || 0) * 60 * 1000;
-  const totalDiffMs = diffInMs + offsetMs;
-
-  const days = Math.floor(totalDiffMs / (1000 * 60 * 60 * 24));
-  const hours = Math.floor(totalDiffMs / (1000 * 60 * 60));
-  const minutes = Math.floor(totalDiffMs / (1000 * 60));
-
-  if (days > 0) return `${days}d`;
-  if (hours > 0) return `${hours}h`;
-  return `${minutes}m`;
+  const daysSinceDiscovery = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+  const daysFromGithub = ageMinutesFromGithub ? Math.floor(ageMinutesFromGithub / 1440) : 0;
+  const finalDays = Math.max(daysSinceDiscovery, daysFromGithub);
+  if (finalDays === 0) return "Today";
+  return `${finalDays}d ago`;
 }
 
 export default async function HomePage({
@@ -30,20 +22,22 @@ export default async function HomePage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const params = await searchParams;
-  
   const timeframe = typeof params.timeframe === "string" ? params.timeframe : "";
   const isCanadaOnly = params.canada === "true";
   const hideApplied = params.hideApplied === "true";
   const search = typeof params.q === "string" ? params.q : "";
+  const categoryParam = typeof params.cat === "string" ? params.cat : "";
+  const activeCategories = categoryParam ? categoryParam.split(",") : [];
 
   const where: any = {};
   if (hideApplied) where.status = "OPEN";
-  
-  // Filtering still uses ageMinutes for consistency with the source data
-  if (timeframe === "24h") where.ageMinutes = { lte: 1440 };
-  else if (timeframe === "week") where.ageMinutes = { lte: 10080 };
+  if (timeframe === "24h") where.ageMinutes = { lt: 1440 };
+  else if (timeframe === "3d") where.ageMinutes = { lt: 4320 };
+  else if (timeframe === "1w") where.ageMinutes = { lt: 10080 };
   
   if (isCanadaOnly) where.location = { contains: "Canada", mode: "insensitive" };
+  if (activeCategories.length > 0) where.category = { in: activeCategories };
+
   if (search) {
     where.OR = [
       { company: { contains: search, mode: "insensitive" } },
@@ -51,9 +45,7 @@ export default async function HomePage({
     ];
   }
 
-  const [totalCount, inProgressCount, jobList, lastJob] = await Promise.all([
-    prismaClient.job.count(),
-    prismaClient.job.count({ where: { NOT: { status: "OPEN" } } }),
+  const [jobList, lastJob, categoryCounts] = await Promise.all([
     prismaClient.job.findMany({
       where,
       orderBy: [
@@ -64,25 +56,28 @@ export default async function HomePage({
       ],
       take: 2000,
     }),
-    prismaClient.job.findFirst({ orderBy: { lastSeenAt: "desc" } })
+    prismaClient.job.findFirst({ orderBy: { lastSeenAt: "desc" } }),
+    prismaClient.job.groupBy({ 
+      by: ['category'],
+      _count: { category: true },
+      orderBy: { category: 'asc' }
+    })
   ]);
 
   const lastSynced = lastJob?.lastSeenAt 
-    ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true }).format(lastJob.lastSeenAt)
+    ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).format(lastJob.lastSeenAt)
     : "Never";
 
   const getUrl = (key: string, value: string | null) => {
     const sp = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => {
-      if (typeof v === "string") sp.set(k, v);
-    });
-
-    if (!value || params[key] === value) {
-      sp.delete(key);
-    } else {
+    Object.entries(params).forEach(([k, v]) => { if (typeof v === "string" && k !== key) sp.set(k, v); });
+    if (key === "cat") {
+      const current = activeCategories;
+      const next = current.includes(value!) ? current.filter(x => x !== value) : [...current, value!];
+      if (next.length > 0) sp.set("cat", next.join(","));
+    } else if (value && params[key] !== value) {
       sp.set(key, value);
     }
-    
     const query = sp.toString();
     return query ? `?${query}` : "/";
   };
@@ -93,65 +88,46 @@ export default async function HomePage({
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">Opportunity Inbox</h1>
-            <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
-              <p>Sorted by: <span className="font-semibold text-slate-700">Newest Postings</span></p>
-              <span>•</span>
-              <p>Last Pulled: <span className="font-mono text-xs font-bold text-slate-600">{lastSynced}</span></p>
-            </div>
+            <p className="text-sm text-slate-500 mt-1 italic">
+              Last Pulled: <span className="font-bold">{lastSynced}</span>
+            </p>
           </div>
           <div className="flex items-center gap-3">
-            <Link href="/applied" className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold shadow-sm hover:bg-slate-50 transition-all">
-              Tracking Board →
-            </Link>
+            <Link href="/applied" className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold shadow-sm hover:bg-slate-50 transition-all">Tracking Board →</Link>
             <form action={pullJobsFromSimplifyJobs}>
-              <FormButton className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-slate-800 transition-all">
-                Pull Data
-              </FormButton>
+              <FormButton className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-slate-800 transition-all">Pull Data</FormButton>
             </form>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <SearchInput placeholder="Search company or role..." defaultValue={search} />
-
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center gap-4">
+            <SearchInput placeholder="Search company or role..." defaultValue={search} />
             <div className="flex bg-slate-100 p-1 rounded-lg">
-              {[{ label: "All", v: null }, { label: "24h", v: "24h" }, { label: "1w", v: "week" }].map((t) => (
-                <Link
-                  key={t.label}
-                  href={getUrl("timeframe", t.v)}
-                  className={`rounded-md px-3 py-1 text-xs font-bold transition-all ${
-                    (timeframe === (t.v || "")) ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  {t.label}
-                </Link>
+              {[{ label: "All", v: null }, { label: "24h", v: "24h" }, { label: "3d", v: "3d" }, { label: "1w", v: "1w" }].map((t) => (
+                <Link key={t.label} href={getUrl("timeframe", t.v)}
+                  className={`rounded-md px-3 py-1 text-xs font-bold transition-all ${(timeframe === (t.v || "")) ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{t.label}</Link>
               ))}
             </div>
-
-            <Link
-              href={getUrl("canada", "true")}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
-                isCanadaOnly ? "bg-red-50 border-red-200 text-red-700 shadow-sm" : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
-              }`}
-            >
-              <div className={`h-3 w-3 rounded-full ${isCanadaOnly ? "bg-red-500" : "bg-slate-200"}`} />
-              🇨🇦 Canada Only
-            </Link>
-
-            <Link
-              href={getUrl("hideApplied", "true")}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
-                hideApplied ? "bg-slate-900 border-slate-900 text-white shadow-sm" : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
-              }`}
-            >
-              <div className={`h-3 w-3 rounded-full ${hideApplied ? "bg-emerald-400" : "bg-slate-200"}`} />
-              Hide Applied
-            </Link>
-            
-            <Link href="/" className="text-xs font-bold text-slate-400 hover:text-slate-900 ml-2">
-              Clear All
-            </Link>
+            <div className="flex items-center gap-2 border-l pl-4 border-slate-200">
+              <Link href={getUrl("canada", "true")} className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${isCanadaOnly ? "bg-red-50 border-red-200 text-red-700 shadow-sm" : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"}`}>🇨🇦 Canada</Link>
+              <Link href={getUrl("hideApplied", "true")} className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${hideApplied ? "bg-slate-900 border-slate-900 text-white shadow-sm" : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"}`}>Hide Applied</Link>
+              <Link href="/" className="text-xs font-bold text-slate-400 hover:text-slate-900 ml-2">Clear All</Link>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 pt-4 border-t border-slate-100">
+             <span className="text-[10px] font-black uppercase text-slate-400 self-center mr-2">Roles:</span>
+             {categoryCounts.map(c => {
+               const isActive = activeCategories.includes(c.category);
+               return (
+                 <Link key={c.category} href={getUrl("cat", c.category)}
+                   className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-tight transition-all border flex items-center gap-2 ${isActive ? "bg-blue-600 border-blue-600 text-white shadow-md" : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"}`}>
+                   {isActive && <span>✓</span>}
+                   {c.category}
+                   <span className={`ml-1 text-[9px] px-1.5 py-0.5 rounded-full ${isActive ? 'bg-blue-500 text-blue-50' : 'bg-slate-200 text-slate-600'}`}>{c._count.category}</span>
+                 </Link>
+               );
+             })}
           </div>
         </div>
 
@@ -160,7 +136,7 @@ export default async function HomePage({
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/50 text-slate-500 font-bold text-[10px] uppercase tracking-widest">
                 <th className="w-48 px-6 py-4">Company</th>
-                <th className="px-6 py-4">Role</th>
+                <th className="px-6 py-4">Role & Category</th>
                 <th className="w-64 px-6 py-4">Location</th>
                 <th className="w-24 px-6 py-4">Posted</th>
                 <th className="w-32 px-6 py-4 text-right">Action</th>
@@ -170,28 +146,21 @@ export default async function HomePage({
               {jobList.map((job) => (
                 <ClickableRow key={job.id} url={job.url} className={`hover:bg-slate-50 ${job.status !== "OPEN" ? "bg-emerald-50/20" : ""}`}>
                   <td className="px-6 py-5 align-top font-bold text-slate-900 truncate">{job.company}</td>
-                  <td className="px-6 py-5 align-top font-medium text-slate-700 truncate">{job.role}</td>
-                  <td className="px-6 py-5 align-top text-slate-500 leading-snug italic truncate">{job.location}</td>
+                  <td className="px-6 py-5 align-top">
+                    <div className="font-medium text-slate-700 truncate">{job.role}</div>
+                    <div className="mt-1 text-[10px] font-bold text-blue-500 uppercase tracking-tight">{job.category}</div>
+                  </td>
+                  <td className="px-6 py-5 align-top text-slate-500 italic truncate">{job.location}</td>
                   <td className="px-6 py-5 align-top">
                     <div className="flex flex-col gap-1">
-                      <span className="text-slate-600 font-medium">
-                        {getDynamicAge(job.firstSeenAt, job.ageMinutes)}
-                      </span>
-                      {/* Badge shows if job was found by us OR posted to GitHub in last 24h */}
-                      {(job.ageMinutes !== null && job.ageMinutes < 1440) && (
-                        <span className="text-[10px] font-black text-orange-500 uppercase italic tracking-tighter">New</span>
-                      )}
+                      <span className="text-slate-600 font-medium">{getDynamicAge(job.firstSeenAt, job.ageMinutes)}</span>
+                      {(job.ageMinutes !== null && job.ageMinutes < 1440) && <span className="text-[10px] font-black text-orange-500 uppercase italic tracking-tighter">New</span>}
                     </div>
                   </td>
                   <td className="px-6 py-5 align-top text-right">
                     <form action={updateJobStatus}>
-                      <input type="hidden" name="jobId" value={job.id} />
-                      <input type="hidden" name="status" value={job.status === "OPEN" ? "APPLIED" : "OPEN"} />
-                      <FormButton className={`rounded-md px-4 py-1.5 text-[11px] font-black uppercase tracking-tighter transition-all shadow-sm ${
-                        job.status !== "OPEN" ? "bg-emerald-600 text-white" : "border border-slate-200 bg-white text-slate-800 hover:border-slate-400"
-                      }`}>
-                        {job.status === "OPEN" ? "Apply" : job.status}
-                      </FormButton>
+                      <input type="hidden" name="jobId" value={job.id} /><input type="hidden" name="status" value={job.status === "OPEN" ? "APPLIED" : "OPEN"} />
+                      <FormButton className={`rounded-md px-4 py-1.5 text-[11px] font-black uppercase transition-all shadow-sm ${job.status !== "OPEN" ? "bg-emerald-600 text-white" : "border border-slate-200 bg-white text-slate-800 hover:border-slate-400"}`}>{job.status === "OPEN" ? "Apply" : job.status}</FormButton>
                     </form>
                   </td>
                 </ClickableRow>
