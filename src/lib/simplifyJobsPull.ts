@@ -23,12 +23,24 @@ function cleanText(input: string): string {
     .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '')
     .trim();
 }
-function cleanCategory(input: string): string {
-  if (!input) return "";
-  return cleanText(input)
-    .replace(/,/g, "")
-    .replace(/\s*Internship\s*Roles/gi, "")
-    .trim();
+
+function parseAgeToMinutes(ageText: string): number | null {
+  const normalized = cleanText(ageText).toLowerCase().replace(/\+/g, "");
+  if (!normalized) return null;
+  const parts = normalized.split(/\s+/);
+  let totalMinutes = 0;
+  let matchedAny = false;
+  for (const part of parts) {
+    const match = part.match(/^(\d+)([dhm])$/);
+    if (!match) continue;
+    matchedAny = true;
+    const value = Number(match[1]);
+    const unit = match[2];
+    if (unit === "d") totalMinutes += value * 1440;
+    if (unit === "h") totalMinutes += value * 60;
+    if (unit === "m") totalMinutes += value;
+  }
+  return matchedAny ? totalMinutes : null;
 }
 
 function normalizeLocationFromHtml(cellHtml: string, cellTextFallback: string): string {
@@ -38,25 +50,6 @@ function normalizeLocationFromHtml(cellHtml: string, cellTextFallback: string): 
     return cleanText(withoutTags);
   }
   return cleanText((cellTextFallback || "").replace(/\n+/g, "; "));
-}
-
-function parseAgeToMinutes(ageText: string): number | null {
-  const normalized = cleanText(ageText).replace(/\+/g, "");
-  if (!normalized) return null;
-  const parts = normalized.split(/\s+/);
-  let totalMinutes = 0;
-  let matchedAny = false;
-  for (const part of parts) {
-    const match = part.match(/^(\d+)([dhm])$/i);
-    if (!match) continue;
-    matchedAny = true;
-    const value = Number(match[1]);
-    const unit = match[2].toLowerCase();
-    if (unit === "d") totalMinutes += value * 24 * 60;
-    if (unit === "h") totalMinutes += value * 60;
-    if (unit === "m") totalMinutes += value;
-  }
-  return matchedAny ? totalMinutes : null;
 }
 
 export async function fetchAndParseSimplifyJobs(): Promise<ParsedJob[]> {
@@ -73,7 +66,7 @@ export async function fetchAndParseSimplifyJobs(): Promise<ParsedJob[]> {
   $("table").each((_, tableEl) => {
     const table = $(tableEl);
     const rawHeading = table.prevAll("h2, h3").first().text();
-    const category = cleanCategory(rawHeading) || "Software Engineering";
+    const category = cleanText(rawHeading).replace(/,/g, "").replace(/\s*Internship\s*Roles/gi, "").trim() || "Software Engineering";
 
     const headerCells = table.find("thead tr").first().find("th");
     const headers = headerCells.toArray().map(th => $(th).text().toLowerCase());
@@ -100,6 +93,7 @@ export async function fetchAndParseSimplifyJobs(): Promise<ParsedJob[]> {
       const role = cleanText(cells.eq(roleIndex).text());
       const location = normalizeLocationFromHtml(cells.eq(locationIndex).html() || "", cells.eq(locationIndex).text());
       const url = cleanText(cells.eq(applicationIndex).find("a").first().attr("href") || "");
+      
       if (!role || !url) return;
 
       const ageText = ageIndex >= 0 ? cleanText(cells.eq(ageIndex).text()) : "";

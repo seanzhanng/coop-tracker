@@ -64,19 +64,11 @@ export async function manuallyAddJob(formData: FormData) {
       data,
     });
   } else {
-    const now = new Date();
-    const midnight = new Date();
-    midnight.setHours(0, 0, 0, 0);
-
     await prismaClient.job.create({
       data: {
         ...data,
         status: "APPLIED",
-        appliedAt: now,
-        firstSeenAt: midnight,
-        lastSeenAt: now,
-        ageMinutes: 0,
-        age: "0d",
+        appliedAt: new Date(),
       },
     });
   }

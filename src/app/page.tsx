@@ -6,14 +6,16 @@ import SearchInput from "@/app/components/SearchInput";
 import ClickableRow from "@/app/components/ClickableRow";
 import ThemeToggle from "./components/ThemeToggle";
 
-function getDynamicAge(firstSeenAt: Date, ageMinutesFromGithub: number | null) {
+function getDynamicAge(firstSeenAt: Date, githubMinutes: number | null) {
   const now = new Date();
-  now.setHours(0, 0, 0, 0); 
-  const diffInMs = now.getTime() - firstSeenAt.getTime();
-  const daysSinceDiscovery = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-  const daysFromGithub = ageMinutesFromGithub ? Math.floor(ageMinutesFromGithub / 1440) : 0;
-  const finalDays = Math.max(daysSinceDiscovery, daysFromGithub);
-  return finalDays === 0 ? "Today" : `${finalDays}d ago`;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const discovery = new Date(firstSeenAt.getFullYear(), firstSeenAt.getMonth(), firstSeenAt.getDate());
+
+  const daysSinceAppSawIt = Math.floor((today.getTime() - discovery.getTime()) / 86400000);
+  const daysOnGithub = githubMinutes ? Math.floor(githubMinutes / 1440) : 0;
+
+  const finalDays = Math.max(daysSinceAppSawIt, daysOnGithub);
+  return finalDays <= 0 ? "Today" : `${finalDays}d ago`;
 }
 
 export default async function HomePage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
@@ -27,25 +29,46 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
 
   const where: any = {};
   if (hideApplied) where.status = "OPEN";
-  if (timeframe === "24h") where.ageMinutes = { lt: 1440 };
-  else if (timeframe === "3d") where.ageMinutes = { lt: 4320 };
-  else if (timeframe === "1w") where.ageMinutes = { lt: 10080 };
+  
+  if (timeframe) {
+    const mins = timeframe === "24h" ? 1440 : timeframe === "3d" ? 4320 : 10080;
+    where.ageMinutes = { lt: mins };
+  }
   
   if (isCanadaOnly) where.location = { contains: "Canada", mode: "insensitive" };
   if (activeCategories.length > 0) where.category = { in: activeCategories };
-  if (search) where.OR = [{ company: { contains: search, mode: "insensitive" } }, { role: { contains: search, mode: "insensitive" } }];
+  if (search) {
+    where.OR = [
+      { company: { contains: search, mode: "insensitive" } }, 
+      { role: { contains: search, mode: "insensitive" } }
+    ];
+  }
 
   const [jobList, lastJob, categoryCounts] = await Promise.all([
     prismaClient.job.findMany({
       where,
-      orderBy: [{ ageMinutes: "asc" }, { company: "asc" }, { role: "asc" }, { url: "asc" }],
+      orderBy: [
+        { ageMinutes: "asc" }, 
+        { company: "asc" }, 
+        { role: "asc" }, 
+        { url: "asc" }
+      ],
       take: 2000,
     }),
-    prismaClient.job.findFirst({ orderBy: { lastSeenAt: "desc" } }),
-    prismaClient.job.groupBy({ by: ['category'], _count: { category: true }, orderBy: { category: 'asc' } })
+    prismaClient.job.findFirst({ 
+        where: { NOT: { url: { startsWith: "manual-" } } },
+        orderBy: { firstSeenAt: "desc" } 
+    }),
+    prismaClient.job.groupBy({ 
+      by: ['category'], 
+      _count: { category: true }, 
+      orderBy: { category: 'asc' } 
+    })
   ]);
 
-  const lastSynced = lastJob?.lastSeenAt ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).format(lastJob.lastSeenAt) : "Never";
+  const lastSynced = lastJob?.firstSeenAt 
+    ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(lastJob.firstSeenAt) 
+    : "Never";
 
   const getUrl = (key: string, value: string | null) => {
     const sp = new URLSearchParams();
@@ -63,14 +86,16 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     <main className="mx-auto w-full max-w-7xl py-10 px-6 antialiased">
       <div className="flex flex-col gap-8">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Job Board</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 italic font-medium">Last Pulled: <span className="font-bold">{lastSynced}</span></p>
+          <div className="flex flex-col justify-center">
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white leading-tight">Job Board</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 italic font-medium">Last Scraped: <span className="font-bold">{lastSynced}</span></p>
           </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
             <Link href="/applied" className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-bold shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 dark:text-white transition-all">Applications →</Link>
-            <form action={pullJobsFromSimplifyJobs}><FormButton className="rounded-lg bg-slate-900 dark:bg-slate-100 dark:text-slate-900 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-slate-800 dark:hover:bg-slate-200 transition-all">Pull Data</FormButton></form>
+            <form action={pullJobsFromSimplifyJobs}>
+              <FormButton className="rounded-lg bg-slate-900 dark:bg-slate-100 dark:text-slate-900 px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-slate-800 dark:hover:bg-slate-200 transition-all">Pull Data</FormButton>
+            </form>
           </div>
         </div>
 
@@ -113,15 +138,36 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {jobList.map((job) => (
-                <ClickableRow key={job.id} url={job.url} className={`hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${job.status !== "OPEN" ? "bg-emerald-50/20 dark:bg-emerald-900/10" : ""}`}>
-                  <td className="px-6 py-5 align-top font-bold text-slate-900 dark:text-white truncate">{job.company}</td>
-                  <td className="px-6 py-5 align-top"><div className="font-medium text-slate-700 dark:text-slate-300 truncate">{job.role}</div><div className="mt-1 text-[10px] font-bold text-blue-500 dark:text-blue-400 uppercase tracking-tight">{job.category}</div></td>
-                  <td className="px-6 py-5 align-top text-slate-500 dark:text-slate-400 italic truncate">{job.location}</td>
-                  <td className="px-6 py-5 align-top"><div className="flex flex-col gap-1"><span className="text-slate-600 dark:text-slate-400 font-medium">{getDynamicAge(job.firstSeenAt, job.ageMinutes)}</span>{(job.ageMinutes !== null && job.ageMinutes < 1440) && <span className="text-[10px] font-black text-orange-500 uppercase italic tracking-tighter">New</span>}</div></td>
-                  <td className="px-6 py-5 align-top text-right"><form action={updateJobStatus}><input type="hidden" name="jobId" value={job.id} /><input type="hidden" name="status" value={job.status === "OPEN" ? "APPLIED" : "OPEN"} /><FormButton className={`rounded-md px-4 py-1.5 text-[11px] font-black uppercase shadow-sm transition-all ${job.status !== "OPEN" ? "bg-emerald-600 text-white border-none hover:bg-emerald-700" : "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-white hover:border-slate-400 dark:hover:border-slate-600"}`}>{job.status === "OPEN" ? "Apply" : job.status}</FormButton></form></td>
-                </ClickableRow>
-              ))}
+              {jobList.map((job) => {
+                const ageText = getDynamicAge(job.firstSeenAt, job.ageMinutes);
+                return (
+                  <ClickableRow key={job.id} url={job.url} className={`hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${job.status !== "OPEN" ? "bg-emerald-50/20 dark:bg-emerald-900/10" : ""}`}>
+                    <td className="px-6 py-5 align-top font-bold text-slate-900 dark:text-white truncate">{job.company}</td>
+                    <td className="px-6 py-5 align-top">
+                      <div className="font-medium text-slate-700 dark:text-slate-300 truncate">{job.role}</div>
+                      <div className="mt-1 text-[10px] font-bold text-blue-500 dark:text-blue-400 uppercase tracking-tight">{job.category}</div>
+                    </td>
+                    <td className="px-6 py-5 align-top text-slate-500 dark:text-slate-400 italic truncate">{job.location}</td>
+                    <td className="px-6 py-5 align-top">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">{ageText}</span>
+                        {(ageText === "Today" || (job.ageMinutes !== null && job.ageMinutes < 1440)) && (
+                          <span className="text-[10px] font-black text-orange-500 uppercase italic tracking-tighter">New</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-5 align-top text-right">
+                      <form action={updateJobStatus}>
+                        <input type="hidden" name="jobId" value={job.id} />
+                        <input type="hidden" name="status" value={job.status === "OPEN" ? "APPLIED" : "OPEN"} />
+                        <FormButton className={`rounded-md px-4 py-1.5 text-[11px] font-black uppercase shadow-sm transition-all ${job.status !== "OPEN" ? "bg-emerald-600 text-white border-none hover:bg-emerald-700" : "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-white hover:border-slate-400 dark:hover:border-slate-600"}`}>
+                          {job.status === "OPEN" ? "Apply" : job.status}
+                        </FormButton>
+                      </form>
+                    </td>
+                  </ClickableRow>
+                );
+              })}
             </tbody>
           </table>
         </div>

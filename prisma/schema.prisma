@@ -27,5 +27,4 @@ model Job {
   status       JobStatus @default(OPEN)
   appliedAt    DateTime?
   firstSeenAt  DateTime  @default(now())
-  lastSeenAt   DateTime  @updatedAt
 }
