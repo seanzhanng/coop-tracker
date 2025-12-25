@@ -50,6 +50,9 @@ export async function manuallyAddJob(formData: FormData) {
   const category = formData.get("category") as string;
   const url = (formData.get("url") as string) || `manual-${Date.now()}`;
 
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+
   const data = {
     company,
     role,
@@ -69,6 +72,7 @@ export async function manuallyAddJob(formData: FormData) {
         ...data,
         status: "APPLIED",
         appliedAt: new Date(),
+        firstSeenAt: midnight,
       },
     });
   }

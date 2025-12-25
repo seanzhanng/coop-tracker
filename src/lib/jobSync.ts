@@ -2,6 +2,9 @@ import prismaClient from "@/lib/prisma";
 import type { ParsedJob } from "@/lib/simplifyJobsPull";
 
 export async function upsertJobsByUrl(parsedJobs: ParsedJob[]) {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+
   const batchSize = 100;
   for (let startIndex = 0; startIndex < parsedJobs.length; startIndex += batchSize) {
     const batch = parsedJobs.slice(startIndex, startIndex + batchSize);
@@ -17,6 +20,7 @@ export async function upsertJobsByUrl(parsedJobs: ParsedJob[]) {
             url: job.url,
             age: job.age,
             ageMinutes: job.ageMinutes,
+            firstSeenAt: midnight,
           },
           update: {
             company: job.company,
