@@ -28,7 +28,12 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const activeCategories = categoryParam ? categoryParam.split(",") : [];
 
   const where: any = {};
-  if (hideApplied) where.status = "OPEN";
+  
+  if (hideApplied) {
+    where.status = "OPEN";
+  } else {
+    where.status = { in: ["OPEN", "APPLIED", "INTERVIEWING", "OFFER"] };
+  }
   
   if (timeframe) {
     const mins = timeframe === "24h" ? 1440 : timeframe === "3d" ? 4320 : 10080;
